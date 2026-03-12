@@ -1,0 +1,29 @@
+---
+description: Laravel IDE helper and Intelephense so the editor recognizes Laravel/Sanctum types
+globs: "**/*.php"
+alwaysApply: false
+---
+
+# Laravel + Intelephense
+
+## Keeping IDE hints accurate
+
+- **Run IDE helper after Composer changes** so facades and model helpers stay in sync:
+  - `php artisan ide-helper:generate` — updates `_ide_helper.php` (facades)
+  - `php artisan ide-helper:models -W` — updates model docblocks (e.g. `vendor/_laravel_ide/_model_helpers.php` or in-model)
+- **`_ide_helper.php`** is for the IDE only; do not include it in runtime.
+
+## When Intelephense reports "undefined method" on Laravel/Sanctum
+
+Framework traits often return **interface** types (e.g. `HasAbilities`), while the real runtime type is a concrete class (e.g. `PersonalAccessToken`). Intelephense only sees the interface, so it does not know about methods like `delete()`.
+
+**Fix at the source:** On the **model** that uses the trait (e.g. `App\Models\User`), add a `@method` in the class docblock for the concrete return type:
+
+```php
+/**
+ * @method \Laravel\Sanctum\PersonalAccessToken|null currentAccessToken()
+ */
+class User extends Authenticatable
+```
+
+Then call sites (e.g. `$request->user()->currentAccessToken()?->delete()`) are understood by the IDE without per-call `@var` annotations.
