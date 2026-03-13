@@ -17,44 +17,95 @@ class NassLibraryService
     public function register(array $data)
     {
         try {
+            Log::info('Sending registration request to Nass Library', [
+                'data' => array_merge($data, ['password' => '[HIDDEN]']) // Hide password in logs
+            ]);
+
+            // Ensure phone field is always present
+            if (!isset($data['phone'])) {
+                $data['phone'] = '';
+            }
+
             $response = Http::post("{$this->baseUrl}/register", $data);
 
-            if ($response->successful()) {
-                $jsonResponse = $response->json();
-
-                // Transform the API response to our expected format
-                return [
-                    'success' => true,
-                    'data' => [
-                        'user' => $jsonResponse['user'] ?? null,
-                        'token' => $jsonResponse['access_token'] ?? null,
-                        'token_type' => $jsonResponse['token_type'] ?? 'Bearer'
-                    ]
-                ];
-            }
-
-            // Handle validation errors (422)
-            if ($response->status() === 422) {
-                $errors = $response->json();
-                return [
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $errors['errors'] ?? $errors
-                ];
-            }
-
-            Log::warning('Registration failed', [
+            Log::info('Registration response from Nass Library', [
                 'status' => $response->status(),
                 'body' => $response->body()
             ]);
 
-            return [
-                'success' => false,
-                'message' => 'Registration failed',
-                'errors' => $response->json() ?? null
-            ];
+            // Check if response is JSON
+            $contentType = $response->header('Content-Type');
+            $isJson = $contentType && str_contains($contentType, 'application/json');
+
+            if ($response->successful()) {
+                if ($isJson) {
+                    $jsonResponse = $response->json();
+
+                    return [
+                        'success' => true,
+                        'data' => [
+                            'user' => $jsonResponse['user'] ?? null,
+                            'token' => $jsonResponse['access_token'] ?? null,
+                            'token_type' => $jsonResponse['token_type'] ?? 'Bearer'
+                        ]
+                    ];
+                } else {
+                    // Successful but not JSON - log warning
+                    Log::warning('Registration response successful but not JSON', [
+                        'content_type' => $contentType
+                    ]);
+
+                    return [
+                        'success' => false,
+                        'message' => 'Invalid response format from server',
+                        'errors' => ['server' => ['The server returned an invalid response']]
+                    ];
+                }
+            }
+
+            // Handle specific HTTP status codes
+            switch ($response->status()) {
+                case 422:
+                    // Validation error
+                    $errors = $isJson ? $response->json() : ['error' => 'Validation failed'];
+                    return [
+                        'success' => false,
+                        'message' => 'Validation failed',
+                        'errors' => $errors['errors'] ?? $errors
+                    ];
+
+                case 500:
+                    // Server error - likely the phone field issue
+                    $errorMessage = 'Nass Library server error';
+
+                    // Check if it's a database error about phone field
+                    if (
+                        str_contains($response->body(), 'phone') &&
+                        str_contains($response->body(), 'null')
+                    ) {
+                        $errorMessage = 'Phone number is required';
+                    } elseif (preg_match('/<title>(.*?)<\/title>/', $response->body(), $matches)) {
+                        $errorMessage .= ': ' . $matches[1];
+                    }
+
+                    return [
+                        'success' => false,
+                        'message' => $errorMessage,
+                        'errors' => ['phone' => ['Phone number might be required']]
+                    ];
+
+                default:
+                    return [
+                        'success' => false,
+                        'message' => 'Registration failed with status: ' . $response->status(),
+                        'errors' => $isJson ? $response->json() : null
+                    ];
+            }
         } catch (\Exception $e) {
-            Log::error('Registration exception', ['error' => $e->getMessage()]);
+            Log::error('Registration exception', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
 
             return [
                 'success' => false,

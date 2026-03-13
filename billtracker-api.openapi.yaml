@@ -1,0 +1,452 @@
+openapi: 3.0.3
+info:
+  title: BillTracker Developer API
+  version: 1.0.0
+  description: |
+    Public API for external developers to access BillTracker data including bills,
+    members, and assemblies. Requires API key authentication with rate limiting
+    and usage tracking.
+
+    **Authentication:** Pass your API key as a Bearer token in the Authorization header.
+
+    **Rate Limit:** 60 requests/minute per key (configurable).
+
+    **Contact:** tech@naltf.gov.ng
+  contact:
+    name: NALTF Tech Team
+    email: tech@naltf.gov.ng
+
+servers:
+  - url: https://billtracker.naltf.gov.ng/api/v1
+    description: Production
+
+paths:
+  /data:
+    post:
+      summary: Fetch public resources
+      description: |
+        Query one or more resources (bills, members, assemblies) with optional
+        filters and pagination. Returns data for all requested resources in a
+        single response.
+      operationId: fetchData
+      tags:
+        - Data
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataRequest"
+            examples:
+              allBills:
+                summary: Fetch all bills
+                value:
+                  resources:
+                    - bills
+              billsWithFilter:
+                summary: Bills filtered by status
+                value:
+                  resources:
+                    - bills
+                  filters:
+                    bills:
+                      status: Passed
+                  pagination:
+                    limit: 10
+                    page: 1
+              multipleResources:
+                summary: Multiple resources with filters
+                value:
+                  resources:
+                    - bills
+                    - members
+                    - assemblies
+                  filters:
+                    members:
+                      party: APC
+                    assemblies:
+                      status: active
+                  pagination:
+                    limit: 20
+                    page: 1
+              membersByState:
+                summary: Members filtered by state and chamber
+                value:
+                  resources:
+                    - members
+                  filters:
+                    members:
+                      state: Lagos
+                      chamber: Senate
+              activeAssemblies:
+                summary: Active assemblies only
+                value:
+                  resources:
+                    - assemblies
+                  filters:
+                    assemblies:
+                      status: active
+      responses:
+        "200":
+          description: Successful response with requested data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+              examples:
+                billsResponse:
+                  summary: Bills response
+                  value:
+                    success: true
+                    data:
+                      bills:
+                        - id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                          number: "HB.001"
+                          title: "A Bill for an Act to Amend..."
+                          summary: "This bill proposes amendments to..."
+                          introduced: "2024-03-15T00:00:00.000Z"
+                          status: "Passed"
+                          lastUpdated: "2024-06-01T00:00:00.000Z"
+                          tags: ["Finance", "Taxation"]
+                          sponsorName: "Hon. John Doe"
+                          source: "external"
+                          firstReading: "2024-03-20T00:00:00.000Z"
+                          secondReading: "2024-04-10T00:00:00.000Z"
+                          thirdReading: "2024-05-25T00:00:00.000Z"
+                    meta:
+                      resource_counts:
+                        bills: 1
+                      page: 1
+                      limit: 50
+        "400":
+          description: Invalid request or resource not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidRequest:
+                  summary: Validation error
+                  value:
+                    success: false
+                    error:
+                      code: INVALID_REQUEST
+                      message: "Expected array, received string at 'resources'"
+                resourceNotAllowed:
+                  summary: Unknown resource
+                  value:
+                    success: false
+                    error:
+                      code: RESOURCE_NOT_ALLOWED
+                      message: "Resource 'votes' is not available."
+        "401":
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingKey:
+                  summary: No API key provided
+                  value:
+                    success: false
+                    error:
+                      code: API_KEY_REQUIRED
+                      message: "API key required in Authorization header."
+                invalidKey:
+                  summary: Invalid API key
+                  value:
+                    success: false
+                    error:
+                      code: INVALID_API_KEY
+                      message: "Invalid or inactive API key."
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - type: object
+                    properties:
+                      retry_after:
+                        type: integer
+                        description: Seconds until rate limit resets
+              examples:
+                rateLimited:
+                  summary: Rate limit exceeded
+                  value:
+                    success: false
+                    error:
+                      code: RATE_LIMIT_EXCEEDED
+                      message: "Rate limit exceeded. Try again in 30s."
+                    retry_after: 30
+        "500":
+          description: Internal server error
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API_KEY
+      description: API key passed as Bearer token
+
+  schemas:
+    DataRequest:
+      type: object
+      required:
+        - resources
+      properties:
+        resources:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+              - bills
+              - members
+              - assemblies
+          description: Resources to fetch. At least one required.
+          example:
+            - bills
+        filters:
+          type: object
+          description: Per-resource filter conditions. Keys are resource names, values are filter objects.
+          properties:
+            bills:
+              $ref: "#/components/schemas/BillFilters"
+            members:
+              $ref: "#/components/schemas/MemberFilters"
+            assemblies:
+              $ref: "#/components/schemas/AssemblyFilters"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    Pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+          description: Number of records per page (1-100)
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+          description: Page number
+
+    BillFilters:
+      type: object
+      description: Filter conditions for bills
+      properties:
+        status:
+          type: string
+          description: "Bill status (e.g., Passed, Awaiting 2nd Reading)"
+        source:
+          type: string
+          enum:
+            - external
+            - manual
+        number:
+          type: string
+          description: Bill number
+        sponsorName:
+          type: string
+
+    MemberFilters:
+      type: object
+      description: Filter conditions for members
+      properties:
+        party:
+          type: string
+          description: Political party
+        state:
+          type: string
+        chamber:
+          type: string
+          description: Legislative chamber
+        gender:
+          type: string
+        isActive:
+          type: boolean
+        name:
+          type: string
+
+    AssemblyFilters:
+      type: object
+      description: Filter conditions for assemblies
+      properties:
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+        name:
+          type: string
+
+    DataResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          description: Keyed by resource name, each containing an array of records
+          properties:
+            bills:
+              type: array
+              items:
+                $ref: "#/components/schemas/Bill"
+            members:
+              type: array
+              items:
+                $ref: "#/components/schemas/Member"
+            assemblies:
+              type: array
+              items:
+                $ref: "#/components/schemas/Assembly"
+        meta:
+          type: object
+          properties:
+            resource_counts:
+              type: object
+              additionalProperties:
+                type: integer
+              description: Count of records returned per resource
+            page:
+              type: integer
+            limit:
+              type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+            message:
+              type: string
+              description: Human-readable error message
+
+    Bill:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: "HB.001"
+        title:
+          type: string
+        summary:
+          type: string
+        introduced:
+          type: string
+          format: date-time
+        status:
+          type: string
+          example: "Passed"
+        lastUpdated:
+          type: string
+          format: date-time
+        tags:
+          type: array
+          items:
+            type: string
+        sponsorName:
+          type: string
+        sponsorExternalId:
+          type: string
+        billFile:
+          type: string
+        source:
+          type: string
+          enum:
+            - external
+            - manual
+        externalId:
+          type: string
+        firstReading:
+          type: string
+          format: date-time
+        secondReading:
+          type: string
+          format: date-time
+        dateReportLaid:
+          type: string
+          format: date-time
+        thirdReading:
+          type: string
+          format: date-time
+
+    Member:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        assemblyId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        party:
+          type: string
+        district:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        imageUrl:
+          type: string
+        state:
+          type: string
+        constituency:
+          type: string
+        chamber:
+          type: string
+        gender:
+          type: string
+        position:
+          type: string
+        isActive:
+          type: boolean
+        biography:
+          type: string
+
+    Assembly:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "10th Assembly"
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
