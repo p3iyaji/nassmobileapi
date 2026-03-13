@@ -26,6 +26,7 @@ class AuthController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255',
             'password' => 'required|string|min:8|confirmed',
+            'phone' => 'sometimes|string|max:20', // Add phone as optional
         ]);
 
         if ($validator->fails()) {
@@ -42,8 +43,10 @@ class AuthController extends Controller
             'email' => $request->email,
             'password' => $request->password,
             'password_confirmation' => $request->password_confirmation,
+            'phone' => $request->phone ?? '000-000-0000', // Provide default empty string if not provided
         ]);
 
+        // Check if the registration was successful
         if (!isset($response['success']) || !$response['success']) {
             return response()->json([
                 'status' => false,
@@ -52,7 +55,7 @@ class AuthController extends Controller
             ], 400);
         }
 
-        // Cache the user data and token
+        // Cache the user data and token if available
         if (isset($response['data']['user']) && isset($response['data']['token'])) {
             $this->cacheUserData($response['data']['user'], $response['data']['token']);
         }
@@ -61,9 +64,9 @@ class AuthController extends Controller
             'status' => true,
             'message' => 'User registered successfully on Nass Library',
             'data' => [
-                'user' => $response['data']['user'] ?? $response['data'],
+                'user' => $response['data']['user'] ?? null,
                 'token' => $response['data']['token'] ?? null,
-                'token_type' => 'Bearer',
+                'token_type' => $response['data']['token_type'] ?? 'Bearer',
             ]
         ], 201);
     }

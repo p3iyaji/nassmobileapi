@@ -13,6 +13,10 @@ return [
     | a conventional file to locate the various service credentials.
     |
     */
+    'billtracker' => [
+        'api_key' => env('BILLTRACKER_API_KEY'),
+        'base_url' => env('BILLTRACKER_BASE_URL', 'https://billtracker.naltf.gov.ng/api/v1'),
+    ],
 
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
